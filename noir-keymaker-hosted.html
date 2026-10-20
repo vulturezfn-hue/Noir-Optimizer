@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOIR Key Maker</title>
+<style>
+  :root{
+    --accent:#6923eb; --accent-hi:#8b55ff; --bg:#141418; --card:#1c1d22; --card2:#17181b;
+    --border:#2f3136; --text:#fff; --muted:#a3a6ad; --dim:#6b6e77; --bad:#e85a5a; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+       padding:16px;max-width:620px;margin:0 auto;}
+  h1{font-size:22px;letter-spacing:4px;margin:4px 0 2px;text-align:center}
+  .sub{text-align:center;color:var(--accent-hi);font-size:11px;font-weight:700;letter-spacing:2px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+  label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0 0 6px;letter-spacing:.5px}
+  input{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:9px;color:var(--text);
+       font-size:16px;padding:12px;font-family:inherit}
+  input:focus{outline:none;border-color:var(--accent)}
+  .mono{font-family:ui-monospace,Consolas,monospace}
+  button{width:100%;border:0;border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;
+       background:var(--accent);color:#fff;margin-top:10px}
+  button:active{background:var(--accent-hi)}
+  button.ghost{background:var(--card2);border:1px solid var(--border);color:var(--text)}
+  .key{font-family:ui-monospace,Consolas,monospace;font-size:26px;font-weight:700;text-align:center;letter-spacing:2px;
+       padding:16px;background:var(--card2);border:1px dashed var(--accent);border-radius:10px;color:#fff;word-break:break-all}
+  .hint{font-size:12px;color:var(--muted);line-height:1.5;margin-top:10px}
+  .err{color:var(--bad);font-size:13px;font-weight:700;text-align:center;margin-top:10px;min-height:16px}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--border);color:var(--muted)}
+  th{color:var(--dim);font-size:10px;letter-spacing:.5px}
+  td.k{font-family:ui-monospace,Consolas,monospace;color:var(--text)}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--accent);color:#fff;
+       padding:10px 18px;border-radius:20px;font-size:13px;font-weight:700;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+  .note{font-size:11px;color:var(--dim);text-align:center;margin-top:18px;line-height:1.5}
+  .lockrow{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--dim);margin-top:4px}
+  .lockrow a{color:var(--accent-hi);cursor:pointer;text-decoration:none}
+</style>
+</head>
+<body>
+  <h1>N O I R</h1>
+  <div class="sub">KEY MAKER</div>
+
+  <!-- Lock screen -->
+  <div class="card" id="lock">
+    <label>Enter passcode</label>
+    <input id="pass" type="password" class="mono" placeholder="passcode" autocomplete="off" autocapitalize="characters">
+    <button id="unlock">Unlock</button>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:400;color:var(--dim)">
+      <input type="checkbox" id="remember" checked style="width:auto"> Remember on this device
+    </label>
+    <div class="err" id="lockErr"></div>
+  </div>
+
+  <!-- Maker (hidden until unlocked) -->
+  <div id="app" style="display:none">
+    <div class="card">
+      <label>Customer name / Discord (for your records)</label>
+      <input id="cust" placeholder="e.g. Dre#1234" autocomplete="off">
+      <label style="margin-top:14px">Their Machine ID (they copy it from the launcher)</label>
+      <input id="mid" class="mono" placeholder="A1B2-C3D4-E5F6-7890" autocomplete="off" autocapitalize="characters">
+      <button id="gen">Make Key</button>
+    </div>
+    <div class="card" id="out" style="display:none">
+      <label>License key &mdash; send this to them</label>
+      <div class="key" id="key">&mdash;</div>
+      <button class="ghost" id="copyKey">Copy key</button>
+      <div class="hint">Lifetime, locked to that one PC. They paste it in the launcher and hit Activate &mdash; works instantly, nothing to upload.</div>
+    </div>
+    <div class="card" id="logCard" style="display:none">
+      <label>Keys you've made on this device</label>
+      <table id="log"></table>
+      <button class="ghost" id="clearLog" style="margin-top:12px">Clear this list</button>
+    </div>
+    <div class="lockrow"><span>Unlocked</span><a id="lockBtn">Lock / forget passcode</a></div>
+  </div>
+
+  <div class="note">Keep this page's link and passcode private. Anyone with both can make keys.</div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const BLOB = {"salt": "UdHpjl9ErLCtWIj946oPuQ==", "iv": "bjhMqP2cSUAX7g1L", "ct": "wmS5WdMrtC8Adwq42OFKA0TLIJinEE/M5ccrPD0br6fJE4ij148MOSPIBQvDkHIbfQR0IRR+aM0=", "iter": 200000};
+const B32 = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const $ = id => document.getElementById(id);
+let SECRET = null;
+
+function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1400); }
+function copy(t,m){ navigator.clipboard.writeText(t).then(()=>toast(m||"Copied!")).catch(()=>{const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();document.execCommand("copy");a.remove();toast(m||"Copied!");}); }
+function b64(s){ return Uint8Array.from(atob(s), c=>c.charCodeAt(0)); }
+
+async function decryptSecret(pass){
+  const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const ak = await crypto.subtle.deriveKey({name:"PBKDF2", salt:b64(BLOB.salt), iterations:BLOB.iter, hash:"SHA-256"}, km, {name:"AES-GCM", length:256}, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:b64(BLOB.iv)}, ak, b64(BLOB.ct));
+  return new TextDecoder().decode(pt);
+}
+function showApp(){ $("lock").style.display="none"; $("app").style.display="block"; renderLog(); }
+
+async function tryUnlock(pass, remember){
+  try {
+    SECRET = await decryptSecret(pass);
+    if(remember){ try{ localStorage.setItem("noirPass", pass); }catch(e){} }
+    showApp();
+    return true;
+  } catch(e){ return false; }
+}
+
+$("unlock").addEventListener("click", async ()=>{
+  const p = $("pass").value.trim();
+  if(!p){ return; }
+  $("lockErr").textContent = "";
+  const ok = await tryUnlock(p, $("remember").checked);
+  if(!ok){ $("lockErr").textContent = "Wrong passcode"; $("pass").value=""; }
+});
+$("pass").addEventListener("keydown", e=>{ if(e.key==="Enter") $("unlock").click(); });
+$("lockBtn").addEventListener("click", ()=>{ try{localStorage.removeItem("noirPass");}catch(e){} SECRET=null; location.reload(); });
+
+// auto-unlock if remembered
+(async ()=>{
+  let saved=null; try{ saved=localStorage.getItem("noirPass"); }catch(e){}
+  if(saved){ await tryUnlock(saved, false); }
+})();
+
+function toB32(bytes){
+  let bits=""; for(const b of bytes) bits += b.toString(2).padStart(8,"0");
+  while(bits.length%5) bits+="0";
+  let out=""; for(let i=0;i<bits.length/5;i++) out += B32[parseInt(bits.substr(i*5,5),2)];
+  return out;
+}
+async function keyFor(machine){
+  const id = machine.toUpperCase().replace(/[^0-9A-F]/g,"");
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode("NOIR-KEY|"+id));
+  const chars = toB32(new Uint8Array(sig)).slice(0,10);
+  return "NOIR-" + chars.slice(0,5) + "-" + chars.slice(5,10);
+}
+
+let current=null;
+$("gen").addEventListener("click", async ()=>{
+  const id = $("mid").value.toUpperCase().replace(/[^0-9A-F]/g,"");
+  if(id.length !== 16){ toast("Machine ID should look like A1B2-C3D4-E5F6-7890"); return; }
+  current = await keyFor(id);
+  $("key").textContent = current;
+  $("out").style.display = "block";
+  saveLog({date:new Date().toISOString().slice(0,16).replace("T"," "), cust:$("cust").value||"-", key:current});
+  renderLog();
+});
+$("copyKey").addEventListener("click", ()=> current && copy(current,"Key copied"));
+
+function saveLog(r){ try{const a=JSON.parse(localStorage.getItem("noirKeys")||"[]");a.unshift(r);localStorage.setItem("noirKeys",JSON.stringify(a.slice(0,100)));}catch(e){} }
+function renderLog(){
+  let a=[]; try{a=JSON.parse(localStorage.getItem("noirKeys")||"[]");}catch(e){}
+  if(!a.length){ $("logCard").style.display="none"; return; }
+  $("logCard").style.display="block";
+  let h="<tr><th>Date</th><th>Customer</th><th>Key</th></tr>";
+  for(const r of a.slice(0,20)) h+=`<tr><td>${r.date}</td><td>${r.cust}</td><td class="k">${r.key}</td></tr>`;
+  $("log").innerHTML=h;
+}
+$("clearLog").addEventListener("click", ()=>{ try{localStorage.removeItem("noirKeys");}catch(e){} renderLog(); toast("Cleared"); });
+$("mid").addEventListener("keydown", e=>{ if(e.key==="Enter") $("gen").click(); });
+</script>
+</body>
+</html>
